@@ -1,4 +1,3 @@
-
 import { useState, useEffect, type ReactNode } from 'react';
 import type { ChatMessage, DataSource, Channel, CampaignPayload, ChatSession } from '../types/chat';
 import { ChatContext } from './ChatContextObject';
@@ -11,13 +10,32 @@ function loadInitialChatsAndId() {
     if (saved) {
       chats = JSON.parse(saved);
     }
-    if (chats.length > 0) {
+    // Auto-create first chat if none exist
+    if (chats.length === 0) {
+      const newChat: ChatSession = {
+        id: `chat_${Date.now()}`,
+        title: 'New Chat',
+        messages: [],
+        timestamp: new Date().toISOString(),
+      };
+      chats = [newChat];
+      chatId = newChat.id;
+    } else {
       const lastId = localStorage.getItem('currentChatId');
       if (lastId && chats.some(c => c.id === lastId)) chatId = lastId;
       else chatId = chats[0].id;
     }
   } catch (e) {
     console.error('Error loading chatSessions from localStorage:', e);
+    // Create a fallback chat on error
+    const fallbackChat: ChatSession = {
+      id: `chat_${Date.now()}`,
+      title: 'New Chat',
+      messages: [],
+      timestamp: new Date().toISOString(),
+    };
+    chats = [fallbackChat];
+    chatId = fallbackChat.id;
   }
   return { chats, chatId };
 }
@@ -37,9 +55,6 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     if (currentChatId) localStorage.setItem('currentChatId', currentChatId);
   }, [currentChatId]);
-
-
-  // No auto-create chat after deletion. Only create on true first load (handled in initial state).
 
   const createNewChat = () => {
     const newChat: ChatSession = {
@@ -106,7 +121,7 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
         createNewChat,
         selectChat,
         updateChatTitle,
-        deleteChat, // <-- add to context
+        deleteChat,
         dataSources,
         setDataSources,
         channels,
