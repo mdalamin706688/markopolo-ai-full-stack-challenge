@@ -31,6 +31,7 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
   const [dataSources, setDataSources] = useState<DataSource[]>([]);
   const [channels, setChannels] = useState<Channel[]>([]);
   const [streamingPayload, setStreamingPayload] = useState<CampaignPayload | null>(null);
+  const [shouldStopStreaming, setShouldStopStreaming] = useState(false);
 
   // Persist chats and currentChatId to localStorage
   useEffect(() => {
@@ -119,6 +120,12 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
     });
   };
 
+  const stopStreaming = () => {
+    setShouldStopStreaming(true);
+    // Reset after a short delay to allow components to react
+    setTimeout(() => setShouldStopStreaming(false), 100);
+  };
+
   return (
     <ChatContext.Provider
       value={{
@@ -137,6 +144,8 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
         setChannels,
         streamingPayload,
         setStreamingPayload,
+        stopStreaming,
+        shouldStopStreaming,
       }}
     >
       {children}

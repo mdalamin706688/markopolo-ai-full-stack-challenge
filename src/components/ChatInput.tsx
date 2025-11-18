@@ -314,15 +314,14 @@ ${recommendations.map((rec, index) => `${index + 1}. ${rec}`).join('\n')}`;
 }
 
 export function ChatInput() {
-  const { addMessage, setStreamingPayload, currentChatId, dataSources, channels, setDataSources, setChannels, createNewChat } = useChatContext() as {
+  const { addMessage, setStreamingPayload, currentChatId, dataSources, channels, createNewChat, shouldStopStreaming } = useChatContext() as {
     addMessage: (msg: ChatMessage, chatId?: string) => void;
     setStreamingPayload: (payload: CampaignPayload) => void;
     currentChatId: string | null;
     dataSources: DataSource[];
     channels: string[];
-    setDataSources: (sources: DataSource[]) => void;
-    setChannels: (channels: string[]) => void;
     createNewChat: () => string;
+    shouldStopStreaming: boolean;
   };
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -364,6 +363,20 @@ export function ChatInput() {
       pausedStateRef.current = null;
     }
   }, [currentChatId]);
+
+  // Stop streaming when global stop signal is received
+  useEffect(() => {
+    if (shouldStopStreaming) {
+      shouldStopRef.current = true;
+      setLoading(false);
+      // Clear any paused state when globally stopping
+      setIsPaused(false);
+      pausedStateRef.current = null;
+      if (currentChatId) {
+        localStorage.removeItem(`chatPausedState_${currentChatId}`);
+      }
+    }
+  }, [shouldStopStreaming, currentChatId]);
 
   const handleSend = async () => {
     if (!input.trim() && !pausedStateRef.current) return;

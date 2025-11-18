@@ -17,6 +17,8 @@ interface ChatContextProps {
   setChannels: (channels: Channel[]) => void;
   streamingPayload: CampaignPayload | null;
   setStreamingPayload: (payload: CampaignPayload | null) => void;
+  stopStreaming: () => void;
+  shouldStopStreaming: boolean;
 }
 
 export const ChatContext = createContext<ChatContextProps | undefined>(undefined);
