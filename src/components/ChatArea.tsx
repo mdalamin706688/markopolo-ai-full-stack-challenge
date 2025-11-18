@@ -32,6 +32,15 @@ export function ChatArea() {
     }
   }, [recentMessages]);
 
+  // Scroll to bottom on initial load
+  useEffect(() => {
+    if (bottomRef.current && recentMessages.length > 0) {
+      setTimeout(() => {
+        bottomRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' });
+      }, 100);
+    }
+  }, [recentMessages.length]);
+
   return (
     <div ref={containerRef} className="overflow-y-auto p-6 space-y-6 max-h-[70vh] will-change-auto" style={{ transform: 'translateZ(0)' }}>
       {(dataSources.length > 0 || channels.length > 0) && recentMessages.length > 0 && (

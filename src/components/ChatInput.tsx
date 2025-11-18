@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, useEffect } from 'react';
 import { useChatContext } from '../context/useChatContext';
 import type { ChatMessage, CampaignPayload, DataSource, Channel } from '../types/chat';
 import { PaperAirplaneIcon } from '@heroicons/react/24/solid';
@@ -314,75 +314,199 @@ ${recommendations.map((rec, index) => `${index + 1}. ${rec}`).join('\n')}`;
 }
 
 export function ChatInput() {
-  const { addMessage, setStreamingPayload, currentChatId, dataSources, channels } = useChatContext() as {
-    addMessage: (msg: ChatMessage) => void;
+  const { addMessage, setStreamingPayload, currentChatId, dataSources, channels, setDataSources, setChannels, createNewChat } = useChatContext() as {
+    addMessage: (msg: ChatMessage, chatId?: string) => void;
     setStreamingPayload: (payload: CampaignPayload) => void;
     currentChatId: string | null;
     dataSources: DataSource[];
     channels: string[];
+    setDataSources: (sources: DataSource[]) => void;
+    setChannels: (channels: string[]) => void;
+    createNewChat: () => string;
   };
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const shouldStopRef = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const [isPaused, setIsPaused] = useState(false);
+  const pausedStateRef = useRef<{
+    jsonIndex: number;
+    explanationIndex: number;
+    streamedJson: string;
+    streamedExplanation: string;
+    streamId: string;
+    explanationId: string;
+    payload: any;
+    userInput: string;
+  } | null>(null);
+
+  // Load paused state from localStorage when currentChatId changes
+  useEffect(() => {
+    if (currentChatId) {
+      const savedPausedState = localStorage.getItem(`chatPausedState_${currentChatId}`);
+      if (savedPausedState) {
+        try {
+          const parsedState = JSON.parse(savedPausedState);
+          pausedStateRef.current = parsedState;
+          setIsPaused(true);
+        } catch (error) {
+          console.error('Failed to load paused state:', error);
+          localStorage.removeItem(`chatPausedState_${currentChatId}`);
+          setIsPaused(false);
+          pausedStateRef.current = null;
+        }
+      } else {
+        setIsPaused(false);
+        pausedStateRef.current = null;
+      }
+    } else {
+      setIsPaused(false);
+      pausedStateRef.current = null;
+    }
+  }, [currentChatId]);
 
   const handleSend = async () => {
-    if (!input.trim()) return;
+    if (!input.trim() && !pausedStateRef.current) return;
     setLoading(true);
+    shouldStopRef.current = false;
+    setIsPaused(false);
 
-    const userMsg: ChatMessage = {
-      id: `user-${Date.now()}`,
-      role: 'user',
-      content: input,
-      timestamp: new Date().toISOString(),
-    };
-    addMessage(userMsg);
-    setInput('');
-    inputRef.current?.focus();
+    // Ensure a chat exists
+    let chatId = currentChatId;
+    if (!chatId) {
+      chatId = createNewChat();
+    }
 
-    const payload = parsePromptToPayload(input, dataSources, channels);
-    setStreamingPayload(payload);
+    let userInput = input;
+    let payload: any;
+
+    // If resuming, use saved state
+    if (pausedStateRef.current) {
+      userInput = pausedStateRef.current.userInput;
+      payload = pausedStateRef.current.payload;
+    } else {
+      // New generation - add user message
+      const userMsg: ChatMessage = {
+        id: `user-${Date.now()}`,
+        role: 'user',
+        content: input,
+        timestamp: new Date().toISOString(),
+      };
+      addMessage(userMsg, chatId);
+      setInput('');
+      inputRef.current?.focus();
+
+      payload = parsePromptToPayload(input, dataSources, channels);
+      setStreamingPayload(payload);
+    }
+
     const jsonStr = JSON.stringify(payload, null, 2);
+    const streamId = pausedStateRef.current?.streamId || `stream-${Date.now()}`;
+    let streamed = pausedStateRef.current?.streamedJson || '';
+    let startIndex = pausedStateRef.current?.jsonIndex || 0;
 
-    const streamId = `stream-${Date.now()}`;
-    let streamed = '';
-
-    for (let i = 0; i < jsonStr.length; i++) {
+    for (let i = startIndex; i < jsonStr.length; i++) {
+      if (shouldStopRef.current) {
+        // Save paused state
+        pausedStateRef.current = {
+          jsonIndex: i,
+          explanationIndex: 0,
+          streamedJson: streamed,
+          streamedExplanation: '',
+          streamId: streamId,
+          explanationId: '',
+          payload,
+          userInput,
+        };
+        setIsPaused(true);
+        localStorage.setItem(`chatPausedState_${chatId}`, JSON.stringify(pausedStateRef.current));
+        break;
+      }
       streamed += jsonStr[i];
       await new Promise((r) => setTimeout(r, 20));
 
       if (i % 5 === 0 || i === jsonStr.length - 1) {
-        const isComplete = i === jsonStr.length - 1;
+        const isComplete = i === jsonStr.length - 1 || shouldStopRef.current;
         addMessage({
           id: `${streamId}-${i}`,
           role: 'system',
           content: streamed,
           timestamp: new Date().toISOString(),
           streaming: !isComplete,
-        });
+        }, chatId);
       }
     }
 
-    setLoading(false);
+    if (!shouldStopRef.current) {
+      setLoading(false);
 
-    // Add explanation message with streaming effect
-    const explanation = generatePayloadExplanation(payload, input);
-    const explanationId = `explanation-${Date.now()}`;
-    let streamedExplanation = '';
+      // Add explanation message with streaming effect
+      const explanation = generatePayloadExplanation(payload, userInput);
+      const explanationId = pausedStateRef.current?.explanationId || `explanation-${Date.now()}`;
+      let streamedExplanation = pausedStateRef.current?.streamedExplanation || '';
+      let explanationStartIndex = pausedStateRef.current?.explanationIndex || 0;
 
-    for (let i = 0; i < explanation.length; i++) {
-      streamedExplanation += explanation[i];
-      await new Promise((r) => setTimeout(r, 15)); // Slightly faster than JSON for premium feel
+      for (let i = explanationStartIndex; i < explanation.length; i++) {
+        if (shouldStopRef.current) {
+          // Save paused state for explanation
+          pausedStateRef.current = {
+            jsonIndex: jsonStr.length,
+            explanationIndex: i,
+            streamedJson: streamed,
+            streamedExplanation,
+            streamId: streamId,
+            explanationId: explanationId,
+            payload,
+            userInput,
+          };
+          setIsPaused(true);
+          localStorage.setItem(`chatPausedState_${chatId}`, JSON.stringify(pausedStateRef.current));
+          break;
+        }
+        streamedExplanation += explanation[i];
+        await new Promise((r) => setTimeout(r, 15)); // Slightly faster than JSON for premium feel
 
-      if (i % 10 === 0 || i === explanation.length - 1) {
-        const isComplete = i === explanation.length - 1;
-        addMessage({
-          id: `${explanationId}-${i}`,
-          role: 'system',
-          content: streamedExplanation,
-          timestamp: new Date().toISOString(),
-          streaming: !isComplete,
-        });
+        if (i % 10 === 0 || i === explanation.length - 1) {
+          const isComplete = i === explanation.length - 1 || shouldStopRef.current;
+          addMessage({
+            id: `${explanationId}-${i}`,
+            role: 'system',
+            content: streamedExplanation,
+            timestamp: new Date().toISOString(),
+            streaming: !isComplete,
+          }, chatId);
+        }
       }
+    }
+
+    // Clear paused state if completed
+    if (!shouldStopRef.current) {
+      pausedStateRef.current = null;
+      if (currentChatId) {
+        localStorage.removeItem(`chatPausedState_${currentChatId}`);
+      }
+      setInput(''); // Clear input after successful completion
+    }
+
+    setLoading(false);
+  };
+
+  const handleStop = () => {
+    shouldStopRef.current = true;
+    setLoading(false);
+    // Save paused state to localStorage
+    if (pausedStateRef.current && currentChatId) {
+      localStorage.setItem(`chatPausedState_${currentChatId}`, JSON.stringify(pausedStateRef.current));
+    }
+  };
+
+  const handleResume = () => {
+    if (pausedStateRef.current && currentChatId) {
+      setIsPaused(false);
+      shouldStopRef.current = false;
+      // Clear paused state from localStorage
+      localStorage.removeItem(`chatPausedState_${currentChatId}`);
+      handleSend();
     }
   };
 
@@ -402,7 +526,7 @@ export function ChatInput() {
           placeholder="Describe your campaign idea..."
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          disabled={loading || !currentChatId}
+          disabled={loading}
           required
         />
         {loading && (
@@ -414,11 +538,36 @@ export function ChatInput() {
       <button
         type="submit"
         className="px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl font-medium shadow-lg hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-        disabled={loading || !input.trim() || !currentChatId}
+        disabled={loading || !input.trim()}
       >
         <span>{loading ? 'Generating...' : 'Generate'}</span>
         <PaperAirplaneIcon className="w-4 h-4" />
       </button>
+      {loading && (
+        <button
+          type="button"
+          onClick={handleStop}
+          className="px-6 py-3 bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 text-white rounded-xl font-medium shadow-lg hover:shadow-xl transition-all duration-200 flex items-center gap-2"
+        >
+          <span>Stop</span>
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 10h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+        </button>
+      )}
+      {isPaused && (
+        <button
+          type="button"
+          onClick={handleResume}
+          className="px-6 py-3 bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white rounded-xl font-medium shadow-lg hover:shadow-xl transition-all duration-200 flex items-center gap-2"
+        >
+          <span>Resume</span>
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.828 14.828a4 4 0 01-5.656 0M9 10h1.586a1 1 0 01.707.293l.707.707A1 1 0 0012.414 11H15m-3 7.5A9.5 9.5 0 1121.5 12 9.5 9.5 0 0112 2.5z" />
+          </svg>
+        </button>
+      )}
     </form>
   );
 }

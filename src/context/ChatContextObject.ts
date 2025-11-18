@@ -3,10 +3,11 @@ import type { ChatMessage, DataSource, Channel, CampaignPayload, ChatSession } f
 
 interface ChatContextProps {
   messages: ChatMessage[];
-  addMessage: (msg: ChatMessage) => void;
+  addMessage: (msg: ChatMessage, chatId?: string) => void;
+  clearStreamingMessages: () => void;
   chats: ChatSession[];
   currentChatId: string | null;
-  createNewChat: () => void;
+  createNewChat: () => string;
   selectChat: (chatId: string) => void;
   updateChatTitle: (chatId: string, newTitle: string) => void;
   deleteChat: (chatId: string) => void;

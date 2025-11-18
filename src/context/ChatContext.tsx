@@ -9,33 +9,17 @@ function loadInitialChatsAndId() {
     const saved = localStorage.getItem('chatSessions');
     if (saved) {
       chats = JSON.parse(saved);
-    }
-    // Auto-create first chat if none exist
-    if (chats.length === 0) {
-      const newChat: ChatSession = {
-        id: `chat_${Date.now()}`,
-        title: 'New Chat',
-        messages: [],
-        timestamp: new Date().toISOString(),
-      };
-      chats = [newChat];
-      chatId = newChat.id;
-    } else {
-      const lastId = localStorage.getItem('currentChatId');
-      if (lastId && chats.some(c => c.id === lastId)) chatId = lastId;
-      else chatId = chats[0].id;
+      if (chats.length > 0) {
+        const lastId = localStorage.getItem('currentChatId');
+        if (lastId && chats.some(c => c.id === lastId)) chatId = lastId;
+        else chatId = chats[0].id;
+      }
     }
   } catch (e) {
     console.error('Error loading chatSessions from localStorage:', e);
-    // Create a fallback chat on error
-    const fallbackChat: ChatSession = {
-      id: `chat_${Date.now()}`,
-      title: 'New Chat',
-      messages: [],
-      timestamp: new Date().toISOString(),
-    };
-    chats = [fallbackChat];
-    chatId = fallbackChat.id;
+    // Don't create fallback chat, just use empty state
+    chats = [];
+    chatId = null;
   }
   return { chats, chatId };
 }
@@ -65,6 +49,12 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
     };
     setChats((prev) => [newChat, ...prev]);
     setCurrentChatId(newChat.id);
+    // Reset data sources and channels for new chat
+    setDataSources([]);
+    setChannels([]);
+    // Clear any paused state
+    localStorage.removeItem('chatPausedState');
+    return newChat.id;
   };
 
   const selectChat = (chatId: string) => {
@@ -73,11 +63,12 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
 
   const currentChat = chats.find((chat) => chat.id === currentChatId);
 
-  const addMessage = (msg: ChatMessage) => {
-    if (!currentChatId) return;
+  const addMessage = (msg: ChatMessage, chatId?: string) => {
+    const targetChatId = chatId || currentChatId;
+    if (!targetChatId) return;
     setChats((prev) =>
       prev.map((chat) =>
-        chat.id === currentChatId
+        chat.id === targetChatId
           ? {
               ...chat,
               messages: [...chat.messages, msg],
@@ -92,6 +83,23 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
     setChats((prev) =>
       prev.map((chat) =>
         chat.id === chatId ? { ...chat, title: newTitle } : chat
+      )
+    );
+  };
+
+  const clearStreamingMessages = () => {
+    if (!currentChatId) return;
+    setChats((prev) =>
+      prev.map((chat) =>
+        chat.id === currentChatId
+          ? {
+              ...chat,
+              messages: chat.messages.map((msg) => ({
+                ...msg,
+                streaming: false,
+              })),
+            }
+          : chat
       )
     );
   };
@@ -116,6 +124,7 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
       value={{
         messages: currentChat?.messages || [],
         addMessage,
+        clearStreamingMessages,
         chats,
         currentChatId,
         createNewChat,
